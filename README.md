@@ -29,5 +29,5 @@ streamlit run app.py
 2. Bấm **Submit**.
 3. Màn hình sẽ hiển thị `positive`, `negative` hoặc `neutral`.
 
-## Ghi chú
-Nếu repo model private, bạn cần đăng nhập Hugging Face trước khi chạy.
+## Ghi chú 
+Do train với số lượng epochs và batch_size thấp do hạn chế GPU nên đôi khi nhận diện không được tốt
