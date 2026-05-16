@@ -5,7 +5,7 @@
 - neutral
 
 Model đang dùng:
-- `sanekojp1508/cyber_abte`
+- `sanekojp1508/qlora-financial`
 
 ## Cấu trúc
 - `app.py`: giao diện Streamlit và logic suy luận
