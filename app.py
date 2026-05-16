@@ -110,6 +110,24 @@ st.set_page_config(
 st.title("💬 Financial Sentiment QLoRA")
 st.caption("Nhập câu tài chính tiếng Anh, bấm Submit để dự đoán sentiment.")
 
+st.markdown("### Ví dụ mẫu")
+
+example_texts = [
+    "Operating profit increased by 25 percent.",
+    "The company reported significant losses.",
+    "The company announced a new board meeting.",
+]
+
+cols = st.columns(3)
+
+for idx, example in enumerate(example_texts):
+    with cols[idx]:
+        if st.button(
+            f"Ví dụ {idx + 1}",
+            use_container_width=True
+        ):
+            st.session_state["example_text"] = example
+
 with st.spinner("Đang tải model..."):
     model, tokenizer, device = load_model_and_tokenizer()
 
@@ -122,6 +140,7 @@ mode = st.radio(
 if mode == "Một câu":
     text = st.text_area(
         "Nhập nội dung",
+        value=st.session_state.get("example_text", ""),
         height=180,
         placeholder="Ví dụ: The company reported strong revenue growth this quarter.",
     )
