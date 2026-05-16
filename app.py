@@ -104,6 +104,26 @@ def predict_sentiment(text, model, tokenizer):
 
     return label, output_text
 
+def batch_predict_sentiment(texts, model, tokenizer):
+    results = []
+
+    for text in texts:
+        if not text.strip():
+            continue
+
+        label, output_text = predict_sentiment(
+            text,
+            model,
+            tokenizer,
+        )
+
+        results.append({
+            "text": text,
+            "label": label,
+            "output": output_text,
+        })
+
+    return results
 
 def predict_sentiment(text, model, tokenizer):
     tokenizer.pad_token_id = tokenizer.eos_token_id
