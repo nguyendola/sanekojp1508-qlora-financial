@@ -51,9 +51,7 @@ def extract_sentiment(text: str) -> str:
 def predict_sentiment(text, model, tokenizer):
     processed_text = preprocess_text(text)
 
-    user_prompt = USER_PROMPT_TEMPLATE.format(
-        input=processed_text
-    )
+    user_prompt = USER_PROMPT_TEMPLATE.format(input=processed_text)
 
     messages = [
         {
@@ -78,10 +76,7 @@ def predict_sentiment(text, model, tokenizer):
         add_special_tokens=False,
     )
 
-    inputs = {
-        k: v.to(model.device)
-        for k, v in inputs.items()
-    }
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     with torch.no_grad():
         output_ids = model.generate(
@@ -91,10 +86,7 @@ def predict_sentiment(text, model, tokenizer):
             pad_token_id=tokenizer.eos_token_id,
         )
 
-    output_ids = output_ids[
-        :,
-        inputs["input_ids"].shape[-1]:
-    ]
+    output_ids = output_ids[:, inputs["input_ids"].shape[-1]:]
 
     output_text = tokenizer.batch_decode(
         output_ids,
@@ -106,22 +98,14 @@ def predict_sentiment(text, model, tokenizer):
     return label, output_text
 
 
-def batch_predict_sentiment(
-    texts,
-    model,
-    tokenizer,
-):
+def batch_predict_sentiment(texts, model, tokenizer):
     results = []
 
     for text in texts:
         if not text.strip():
             continue
 
-        label, output_text = predict_sentiment(
-            text,
-            model,
-            tokenizer,
-        )
+        label, output_text = predict_sentiment(text, model, tokenizer)
 
         results.append({
             "text": text,
@@ -132,26 +116,18 @@ def batch_predict_sentiment(
     return results
 
 
-def render_sentiment_result(
-    label,
-    output_text=None,
-):
+def render_sentiment_result(label, output_text=None):
     if label == "positive":
         st.success("😊 Positive")
-
     elif label == "negative":
         st.error("😠 Negative")
-
     elif label == "neutral":
         st.info("😐 Neutral")
-
     else:
         st.warning("⚠️ Unknown")
 
     if output_text:
-        st.write(
-            f"**Model output:** `{output_text}`"
-        )
+        st.write(f"**Model output:** `{output_text}`")
 
 
 st.set_page_config(
@@ -161,12 +137,7 @@ st.set_page_config(
 )
 
 st.title("💬 Financial Sentiment QLoRA")
-
-st.caption(
-    "Nhập câu tài chính tiếng Anh để dự đoán sentiment."
-)
-
-st.markdown("### Ví dụ mẫu")
+st.caption("Nhập câu tài chính tiếng Anh để dự đoán sentiment.")
 
 example_texts = [
     "Operating profit increased by 25 percent.",
@@ -174,20 +145,8 @@ example_texts = [
     "The company announced a new board meeting.",
 ]
 
-cols = st.columns(3)
-
-for idx, example in enumerate(example_texts):
-    with cols[idx]:
-        if st.button(
-            f"Ví dụ {idx + 1}",
-            use_container_width=True,
-        ):
-            st.session_state["example_text"] = example
-
-
 with st.spinner("Đang tải model..."):
     model, tokenizer = load_model_and_tokenizer()
-
 
 mode = st.radio(
     "Chế độ dự đoán",
@@ -195,44 +154,39 @@ mode = st.radio(
     horizontal=True,
 )
 
-
 if mode == "Một câu":
+    st.markdown("### Ví dụ mẫu")
+
+    cols = st.columns(3)
+
+    for idx, example in enumerate(example_texts):
+        with cols[idx]:
+            if st.button(
+                f"Ví dụ {idx + 1}",
+                use_container_width=True,
+                key=f"single_example_{idx}",
+            ):
+                st.session_state["example_text"] = example
 
     text = st.text_area(
         "Nhập nội dung",
-        value=st.session_state.get(
-            "example_text",
-            "",
-        ),
+        value=st.session_state.get("example_text", ""),
         height=180,
         placeholder="Ví dụ: The company reported strong revenue growth this quarter.",
     )
 
-    if st.button(
-        "Submit",
-        type="primary",
-    ):
-
+    if st.button("Submit", type="primary"):
         if not text.strip():
-            st.warning(
-                "Vui lòng nhập nội dung trước khi dự đoán."
-            )
-
+            st.warning("Vui lòng nhập nội dung trước khi dự đoán.")
         else:
-            with st.spinner(
-                "Đang phân tích cảm xúc..."
-            ):
-
+            with st.spinner("Đang phân tích cảm xúc..."):
                 label, output_text = predict_sentiment(
                     text,
                     model,
                     tokenizer,
                 )
 
-            render_sentiment_result(
-                label,
-                output_text,
-            )
+            render_sentiment_result(label, output_text)
 
             with st.expander("Chi tiết"):
                 st.json({
@@ -243,11 +197,19 @@ if mode == "Một câu":
                     "device": str(model.device),
                 })
 
-
 else:
+    st.markdown("### Ví dụ batch")
+
+    if st.button(
+        "Load ví dụ batch",
+        use_container_width=True,
+        key="load_batch_examples",
+    ):
+        st.session_state["example_batch_text"] = "\n".join(example_texts)
 
     text_batch = st.text_area(
         "Nhập nhiều câu, mỗi câu một dòng",
+        value=st.session_state.get("example_batch_text", ""),
         height=220,
         placeholder=(
             "Operating profit increased by 25 percent.\n"
@@ -256,11 +218,7 @@ else:
         ),
     )
 
-    if st.button(
-        "Submit batch",
-        type="primary",
-    ):
-
+    if st.button("Submit batch", type="primary"):
         texts = [
             line.strip()
             for line in text_batch.splitlines()
@@ -268,16 +226,9 @@ else:
         ]
 
         if not texts:
-            st.warning(
-                "Vui lòng nhập ít nhất một câu."
-            )
-
+            st.warning("Vui lòng nhập ít nhất một câu.")
         else:
-
-            with st.spinner(
-                "Đang phân tích batch..."
-            ):
-
+            with st.spinner("Đang phân tích batch..."):
                 results = batch_predict_sentiment(
                     texts,
                     model,
@@ -287,22 +238,14 @@ else:
             st.subheader("Kết quả")
 
             for item in results:
-
-                st.write(
-                    f"**Sentence:** {item['text']}"
-                )
-
+                st.write(f"**Sentence:** {item['text']}")
                 render_sentiment_result(
                     item["label"],
                     item["output"],
                 )
-
                 st.divider()
 
-            with st.expander(
-                "Chi tiết JSON"
-            ):
-
+            with st.expander("Chi tiết JSON"):
                 st.json({
                     "results": results,
                     "model": MODEL_ID,
