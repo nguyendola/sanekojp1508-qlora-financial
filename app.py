@@ -1,3 +1,5 @@
+import re
+
 import streamlit as st
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -36,14 +38,19 @@ def preprocess_text(text: str) -> str:
 
 
 def extract_sentiment(text: str) -> str:
-    text = text.lower()
+    text = text.strip().lower()
 
-    if "positive" in text:
-        return "positive"
-    elif "negative" in text:
-        return "negative"
-    elif "neutral" in text:
-        return "neutral"
+    # Ưu tiên bắt đúng format: Sentiment: neutral
+    match = re.search(r"sentiment\s*:\s*(positive|negative|neutral)", text)
+
+    if match:
+        return match.group(1)
+
+    # Nếu model chỉ trả về 1 từ
+    words = re.findall(r"\b(positive|negative|neutral)\b", text)
+
+    if words:
+        return words[-1]  # lấy nhãn cuối cùng thay vì positive đầu tiên
 
     return "unknown"
 
@@ -98,22 +105,64 @@ def predict_sentiment(text, model, tokenizer):
     return label, output_text
 
 
-def batch_predict_sentiment(texts, model, tokenizer):
-    results = []
+def predict_sentiment(text, model, tokenizer):
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    for text in texts:
-        if not text.strip():
-            continue
+    processed_text = preprocess_text(text)
 
-        label, output_text = predict_sentiment(text, model, tokenizer)
+    user_prompt = USER_PROMPT_TEMPLATE.format(input=processed_text)
 
-        results.append({
-            "text": text,
-            "label": label,
-            "output": output_text,
-        })
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant. You must fulfill the user request."
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        },
+    ]
 
-    return results
+    input_prompt = tokenizer.apply_chat_template(
+        conversation=messages,
+        add_generation_prompt=True,
+        tokenize=False
+    )
+
+    inputs = tokenizer(
+        input_prompt,
+        return_tensors="pt",
+        add_special_tokens=False
+    )
+
+    inputs = {
+        k: v.to(model.device)
+        for k, v in inputs.items()
+    }
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=16,
+            do_sample=False,
+            temperature=None,
+            top_p=None,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    output_ids = output_ids[
+        :,
+        inputs["input_ids"][0].shape[-1]:output_ids.shape[-1]
+    ]
+
+    output_text = tokenizer.batch_decode(
+        output_ids,
+        skip_special_tokens=True
+    )[0].strip()
+
+    label = extract_sentiment(output_text)
+
+    return label, output_text
 
 
 def render_sentiment_result(label, output_text=None):
@@ -142,7 +191,7 @@ st.caption("Nhập câu tài chính tiếng Anh để dự đoán sentiment.")
 example_texts = [
     "Operating profit increased by 25 percent.",
     "The company reported significant losses.",
-    "The company announced a new board meeting.",
+    "I have no idea.",
 ]
 
 with st.spinner("Đang tải model..."):
