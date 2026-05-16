@@ -263,7 +263,7 @@ else:
         placeholder=(
             "Operating profit increased by 25 percent.\n"
             "The company reported significant losses.\n"
-            "The company announced a new board meeting."
+            "I have no idea."
         ),
     )
 
