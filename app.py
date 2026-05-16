@@ -1,104 +1,136 @@
 import streamlit as st
 import torch
-import torch.nn.functional as F
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_ID = "sanekojp1508/qlora-financial"
 
-id2label = {
-    0: "negative",
-    1: "neutral",
-    2: "positive",
-}
+USER_PROMPT_TEMPLATE = """Predict the sentiment of the following input sentence.
+The response must begin with "Sentiment: ", followed by one of these keywords: "positive", "negative", or "neutral", to reflect the sentiment of the input sentence.
+
+Sentence: {input}"""
 
 
 @st.cache_resource
 def load_model_and_tokenizer():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    model = model.to(device)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else None,
+    )
+
+    if not torch.cuda.is_available():
+        model = model.to("cpu")
+
     model.eval()
 
-    return model, tokenizer, device
+    return model, tokenizer
 
 
 def preprocess_text(text: str) -> str:
     return text.strip()
 
 
-def predict_sentiment(text, model, tokenizer, device, id2label):
+def extract_sentiment(text: str) -> str:
+    text = text.lower()
+
+    if "positive" in text:
+        return "positive"
+    elif "negative" in text:
+        return "negative"
+    elif "neutral" in text:
+        return "neutral"
+
+    return "unknown"
+
+
+def predict_sentiment(text, model, tokenizer):
     processed_text = preprocess_text(text)
 
-    inputs = tokenizer(
-        processed_text,
-        return_tensors="pt",
-        truncation=True,
-        padding=True,
-        max_length=256,
-    )
+    user_prompt = USER_PROMPT_TEMPLATE.format(input=processed_text)
 
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-
-    probs = F.softmax(outputs.logits, dim=-1)
-    pred_id = torch.argmax(probs, dim=-1).item()
-    confidence = probs[0][pred_id].item()
-
-    return id2label[pred_id], confidence
-
-
-def batch_predict_sentiment(texts, model, tokenizer, device, id2label):
-    processed_texts = [
-        preprocess_text(text)
-        for text in texts
-        if text.strip()
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant. You must fulfill the user request.",
+        },
+        {
+            "role": "user",
+            "content": user_prompt,
+        },
     ]
 
-    inputs = tokenizer(
-        processed_texts,
-        return_tensors="pt",
-        truncation=True,
-        padding=True,
-        max_length=256,
+    input_prompt = tokenizer.apply_chat_template(
+        conversation=messages,
+        add_generation_prompt=True,
+        tokenize=False,
     )
 
-    inputs = {k: v.to(device) for k, v in inputs.items()}
+    inputs = tokenizer(
+        input_prompt,
+        return_tensors="pt",
+        add_special_tokens=False,
+    )
+
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     with torch.no_grad():
-        outputs = model(**inputs)
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=16,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
 
-    probs = F.softmax(outputs.logits, dim=-1)
-    pred_ids = torch.argmax(probs, dim=-1)
+    output_ids = output_ids[:, inputs["input_ids"].shape[-1]:]
+    output_text = tokenizer.batch_decode(
+        output_ids,
+        skip_special_tokens=True,
+    )[0].strip()
 
+    label = extract_sentiment(output_text)
+
+    return label, output_text
+
+
+def batch_predict_sentiment(texts, model, tokenizer):
     results = []
 
-    for i, pred_id in enumerate(pred_ids):
-        pred_id = pred_id.item()
-        confidence = probs[i][pred_id].item()
+    for text in texts:
+        if not text.strip():
+            continue
+
+        label, output_text = predict_sentiment(
+            text,
+            model,
+            tokenizer,
+        )
 
         results.append({
-            "text": processed_texts[i],
-            "label": id2label[pred_id],
-            "confidence": round(confidence, 6),
+            "text": text,
+            "label": label,
+            "output": output_text,
         })
 
     return results
 
 
-def render_sentiment_result(label, score):
+def render_sentiment_result(label, output_text=None):
     if label == "positive":
         st.success("😊 Positive")
     elif label == "negative":
         st.error("😠 Negative")
-    else:
+    elif label == "neutral":
         st.info("😐 Neutral")
+    else:
+        st.warning("⚠️ Unknown")
 
-    st.write(f"**Confidence:** {score:.4f}")
+    if output_text:
+        st.write(f"**Model output:** `{output_text}`")
 
 
 st.set_page_config(
@@ -124,12 +156,13 @@ for idx, example in enumerate(example_texts):
     with cols[idx]:
         if st.button(
             f"Ví dụ {idx + 1}",
-            use_container_width=True
+            use_container_width=True,
         ):
             st.session_state["example_text"] = example
 
+
 with st.spinner("Đang tải model..."):
-    model, tokenizer, device = load_model_and_tokenizer()
+    model, tokenizer = load_model_and_tokenizer()
 
 mode = st.radio(
     "Chế độ dự đoán",
@@ -150,23 +183,21 @@ if mode == "Một câu":
             st.warning("Vui lòng nhập nội dung trước khi dự đoán.")
         else:
             with st.spinner("Đang phân tích cảm xúc..."):
-                label, score = predict_sentiment(
+                label, output_text = predict_sentiment(
                     text,
                     model,
                     tokenizer,
-                    device,
-                    id2label,
                 )
 
-            render_sentiment_result(label, score)
+            render_sentiment_result(label, output_text)
 
             with st.expander("Chi tiết"):
                 st.json({
                     "text": text,
                     "label": label,
-                    "confidence": round(score, 6),
+                    "model_output": output_text,
                     "model": MODEL_ID,
-                    "device": str(device),
+                    "device": str(model.device),
                 })
 
 else:
@@ -174,9 +205,9 @@ else:
         "Nhập nhiều câu, mỗi câu một dòng",
         height=220,
         placeholder=(
-            "The company reported strong revenue growth this quarter.\n"
-            "Operating profit declined compared with last year.\n"
-            "The company announced a new office in Finland."
+            "Operating profit increased by 25 percent.\n"
+            "The company reported significant losses.\n"
+            "The company announced a new board meeting."
         ),
     )
 
@@ -195,8 +226,6 @@ else:
                     texts,
                     model,
                     tokenizer,
-                    device,
-                    id2label,
                 )
 
             st.subheader("Kết quả")
@@ -205,7 +234,7 @@ else:
                 st.write(f"**Sentence:** {item['text']}")
                 render_sentiment_result(
                     item["label"],
-                    item["confidence"],
+                    item["output"],
                 )
                 st.divider()
 
@@ -213,5 +242,5 @@ else:
                 st.json({
                     "results": results,
                     "model": MODEL_ID,
-                    "device": str(device),
+                    "device": str(model.device),
                 })
